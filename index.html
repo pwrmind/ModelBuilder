@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Matrix Builder (fixed)</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <!-- Google Fonts (monospace for editor) -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        .editor-textarea {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 0.85rem;
+            min-height: 400px;
+            resize: vertical;
+        }
+        .actor-badge {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-right: 2px;
+        }
+        .heatmap-cell {
+            width: 40px;
+            height: 40px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        .console-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            padding: 0.5rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .status-badge {
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Alpine.js App -->
+    <div x-data="builderApp()" x-init="$nextTick(() => parseDSL())" class="container-fluid py-3">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">
+                <i class="fa-solid fa-brain me-2"></i>Knowledge Matrix Builder
+            </h4>
+            <div>
+                <span class="badge me-2" :class="modelLoaded ? 'bg-success' : 'bg-secondary'">
+                    <i class="fa-solid fa-microchip me-1"></i>
+                    <span x-text="modelLoaded ? 'Модель готова' : 'Модель не загружена'"></span>
+                </span>
+                <button class="btn btn-sm btn-outline-secondary" @click="exportMatrix" :disabled="!compiled">
+                    <i class="fa-solid fa-download me-1"></i>Экспорт матрицы
+                </button>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- LEFT PANEL: Editor & Parsed Tables -->
+            <div class="col-md-6">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <ul class="nav nav-pills card-header-pills" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active btn-sm" id="editor-tab" data-bs-toggle="pill" 
+                                        data-bs-target="#editor-content" type="button" role="tab">Редактор DSL</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link btn-sm" id="tables-tab" data-bs-toggle="pill" 
+                                        data-bs-target="#tables-content" type="button" role="tab">Спарсенные таблицы</button>
+                            </li>
+                        </ul>
+                        <span class="badge bg-info text-dark" x-text="'Сущностей: ' + totalEntities()"></span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="tab-content">
+                            <!-- Editor Tab -->
+                            <div class="tab-pane fade show active" id="editor-content" role="tabpanel">
+                                <textarea 
+                                    class="form-control form-control-sm editor-textarea border-0" 
+                                    x-model="dslText" 
+                                    @input="debouncedParse()"
+                                    placeholder="Введите DSL описание..."
+                                    spellcheck="false"></textarea>
+                            </div>
+                            <!-- Parsed Tables Tab -->
+                            <div class="tab-pane fade" id="tables-content" role="tabpanel" style="max-height: 500px; overflow-y: auto;">
+                                <div class="p-2" x-show="parsed.actors.length">
+                                    <h6 class="text-muted small">Актёры</h6>
+                                    <table class="table table-sm table-bordered small mb-2">
+                                        <thead><tr><th>Имя</th><th>Синонимы</th><th>Цвет</th></tr></thead>
+                                        <tbody>
+                                            <template x-for="a in parsed.actors" :key="a.id">
+                                                <tr>
+                                                    <td x-text="a.name"></td>
+                                                    <td x-text="a.synonyms.join(', ')"></td>
+                                                    <td><span class="actor-badge" :style="'background-color:' + a.color" x-text="a.color"></span></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="p-2" x-show="parsed.states.length">
+                                    <h6 class="text-muted small">Состояния</h6>
+                                    <table class="table table-sm table-bordered small mb-2">
+                                        <thead><tr><th>Текст</th><th>Теги акторов</th></tr></thead>
+                                        <tbody>
+                                            <template x-for="s in parsed.states" :key="s.id">
+                                                <tr>
+                                                    <td x-text="s.text"></td>
+                                                    <td>
+                                                        <template x-for="tag in s.tags" :key="tag">
+                                                            <span class="actor-badge" :style="'background-color:' + getActorColor(tag)" x-text="tag"></span>
+                                                        </template>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="p-2" x-show="parsed.conditions.length">
+                                    <h6 class="text-muted small">Условия</h6>
+                                    <table class="table table-sm table-bordered small mb-2">
+                                        <thead><tr><th>Текст</th><th>Теги акторов</th><th>Порог</th></tr></thead>
+                                        <tbody>
+                                            <template x-for="c in parsed.conditions" :key="c.id">
+                                                <tr>
+                                                    <td x-text="c.text"></td>
+                                                    <td>
+                                                        <template x-for="tag in c.tags" :key="tag">
+                                                            <span class="actor-badge" :style="'background-color:' + getActorColor(tag)" x-text="tag"></span>
+                                                        </template>
+                                                    </td>
+                                                    <td x-text="c.threshold"></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="p-2" x-show="parsed.actions.length">
+                                    <h6 class="text-muted small">Действия</h6>
+                                    <table class="table table-sm table-bordered small mb-2">
+                                        <thead><tr><th>Описание</th><th>Код</th><th>Теги акторов</th></tr></thead>
+                                        <tbody>
+                                            <template x-for="a in parsed.actions" :key="a.id">
+                                                <tr>
+                                                    <td x-text="a.text"></td>
+                                                    <td><code x-text="a.code" style="font-size:0.7rem"></code></td>
+                                                    <td>
+                                                        <template x-for="tag in a.tags" :key="tag">
+                                                            <span class="actor-badge" :style="'background-color:' + getActorColor(tag)" x-text="tag"></span>
+                                                        </template>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div x-show="parsed.actors.length == 0 && parsed.states.length == 0 && parsed.conditions.length == 0 && parsed.actions.length == 0" class="p-3 text-muted small">
+                                    Нет данных. Проверьте синтаксис DSL в редакторе.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: Dashboard, Compile, Test, Console -->
+            <div class="col-md-6">
+                <!-- Compile & Status -->
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header py-2">
+                        <i class="fa-solid fa-gear me-2"></i>Управление компиляцией
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-sm btn-primary" @click="compile()" :disabled="modelLoading || (parsed.conditions.length == 0 && parsed.actions.length == 0)">
+                                <i class="fa-solid fa-hammer me-1"></i>
+                                <span x-show="!modelLoading">Скомпилировать матрицу</span>
+                                <span x-show="modelLoading"><span class="spinner-border spinner-border-sm" role="status"></span> Компиляция...</span>
+                            </button>
+                            <div class="alert alert-sm alert-info mb-0" role="alert" x-show="compileMessage" x-text="compileMessage"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Heatmap card -->
+                <div class="card shadow-sm mb-3" x-show="heatmapData.length > 0">
+                    <div class="card-header py-2">
+                        <i class="fa-solid fa-table-cells me-2"></i>Тепловая карта сходства условий
+                    </div>
+                    <div class="card-body p-2" style="max-height: 300px; overflow: auto;">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered mb-0">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <template x-for="cid in heatmapIds" :key="cid">
+                                            <th class="text-center small" x-text="cid"></th>
+                                        </template>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(row, ri) in heatmapData" :key="ri">
+                                        <tr>
+                                            <th class="small" x-text="heatmapIds[ri]"></th>
+                                            <template x-for="(val, ci) in row" :key="ci">
+                                                <td class="heatmap-cell" :style="'background-color:' + heatmapColor(val)" 
+                                                    :title="val.toFixed(3)"></td>
+                                            </template>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Sandbox -->
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header py-2">
+                        <i class="fa-solid fa-flask me-2"></i>Песочница тестирования
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-2">
+                            <label class="form-label small">Текущее состояние мира (можно на любом языке):</label>
+                            <textarea class="form-control form-control-sm" rows="3" x-model="testInput" 
+                                placeholder="Например: робот на базе, пустой, склад выдал груз"></textarea>
+                        </div>
+                        <button class="btn btn-sm btn-success" @click="runTest()" :disabled="!compiled || modelLoading || testInput.trim() === ''">
+                            <i class="fa-solid fa-play me-1"></i>Запустить тест
+                        </button>
+
+                        <!-- Исправлено: используем x-if, чтобы не вычислять свойства null -->
+                        <template x-if="testResult">
+                        <div class="mt-2">
+                            <div class="alert alert-success mb-1 p-2 small" role="alert">
+                                <strong>Выбрано действие:</strong> <span x-text="testResult.actionText"></span><br>
+                                <strong>Код:</strong> <code x-text="testResult.actionCode"></code><br>
+                                <strong>Уверенность:</strong> <span x-text="(testResult.score * 100).toFixed(1) + '%'"></span>
+                            </div>
+                            <details class="small">
+                                <summary>Ранжированный список действий</summary>
+                                <ul class="list-unstyled mb-0">
+                                    <template x-for="(item, idx) in testResult.ranking" :key="idx">
+                                        <li><span x-text="item.text"></span> (<span x-text="item.score.toFixed(3)"></span>)</li>
+                                    </template>
+                                </ul>
+                            </details>
+                        </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Console -->
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                        <span><i class="fa-solid fa-terminal me-2"></i>Консоль</span>
+                        <button class="btn btn-sm btn-outline-secondary" @click="consoleLogs = []"><i class="fa-solid fa-eraser"></i></button>
+                    </div>
+                    <div class="console-log" id="consoleLog" x-ref="consoleBox">
+                        <div x-show="consoleLogs.length == 0" class="text-muted">Лог пуст</div>
+                        <template x-for="(log, idx) in consoleLogs" :key="idx">
+                            <div x-text="log"></div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Alpine.js (global) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
+
+    <!-- ====== НОВЫЙ СПОСОБ ПОДКЛЮЧЕНИЯ Transformers.js ====== -->
+    <script type="importmap">
+        {
+            "imports": {
+                "@xenova/transformers": "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.14.0/dist/transformers.min.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        // Весь основной код загружен как модуль, Alpine уже глобальный.
+        // Определяем Alpine-компонент.
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('builderApp', () => {
+                // Predefined actor colors
+                const actorColors = ['#4dc9f6', '#f67019', '#f53794', '#537bc4', '#acc236', '#166a8f', '#00a950', '#58595b', '#8549ba'];
+                let colorIndex = 0;
+                
+                return {
+                    dslText: `Актёры:\n- робот [синонимы: гобот, шасси, тележка]\n- склад [синонимы: вархаус, ячейка]\n- база [синонимы: зарядка, станция]\n- груз [синонимы: паллета, коробка, посылка]\n- ворота\n\nСостояния:\n- робот пустой и находится на базе\n- на складе готов груз\n- впереди робота возникла стена\n\nУсловия:\n- если робот пустой и на базе\n- если на складе появился новый груз\n- если путь заблокирован препятствием\n\nДействия:\n- робот начинает движение вперед -> robot.drive.forward()\n- робот поворачивает налево -> robot.drive.turn(-90)\n- робот активирует захват -> robot.arm.grab()`,
+                    parsed: {
+                        actors: [],
+                        states: [],
+                        conditions: [],
+                        actions: []
+                    },
+                    compiled: null,
+                    heatmapData: [],
+                    heatmapIds: [],
+                    modelLoading: false,
+                    modelLoaded: false,
+                    compileMessage: '',
+                    testInput: '',
+                    testResult: null,
+                    consoleLogs: [],
+                    embedder: null,
+
+                    init() {
+                        this.parseDSL();
+                        this.debouncedParse = this.debounce(() => this.parseDSL(), 400);
+                    },
+
+                    // =========== Parser ===========
+                    parseDSL() {
+                        const text = this.dslText;
+                        const lines = text.split('\n');
+                        let section = null;
+                        const actors = [];
+                        const states = [];
+                        const conditions = [];
+                        const actions = [];
+                        
+                        colorIndex = 0;
+                        const actorColorMap = {};
+
+                        for (let line of lines) {
+                            const trimmed = line.trim();
+                            if (trimmed.startsWith('Актёры:')) { section = 'actors'; continue; }
+                            if (trimmed.startsWith('Состояния:')) { section = 'states'; continue; }
+                            if (trimmed.startsWith('Условия:')) { section = 'conditions'; continue; }
+                            if (trimmed.startsWith('Действия:')) { section = 'actions'; continue; }
+                            if (!trimmed || !trimmed.startsWith('-')) continue;
+
+                            const itemLine = trimmed.substring(1).trim();
+                            switch (section) {
+                                case 'actors':
+                                    const actorMatch = itemLine.match(/^(.+?)\s*\[синонимы:\s*(.+?)\]$/i);
+                                    let name, synonyms = [];
+                                    if (actorMatch) {
+                                        name = actorMatch[1].trim();
+                                        synonyms = actorMatch[2].split(',').map(s => s.trim().toLowerCase());
+                                    } else {
+                                        name = itemLine.split(' ')[0].trim();
+                                    }
+                                    if (!actorColorMap[name]) {
+                                        actorColorMap[name] = actorColors[colorIndex % actorColors.length];
+                                        colorIndex++;
+                                    }
+                                    actors.push({
+                                        id: 'act_' + name.toLowerCase(),
+                                        name: name,
+                                        synonyms: synonyms,
+                                        color: actorColorMap[name]
+                                    });
+                                    break;
+                                case 'states':
+                                    states.push({ id: 'st_' + Date.now() + '_' + Math.random().toString(36), text: itemLine, tags: [] });
+                                    break;
+                                case 'conditions':
+                                    conditions.push({ id: 'cond_' + Date.now() + '_' + Math.random().toString(36), text: itemLine, threshold: 0.8, tags: [] });
+                                    break;
+                                case 'actions':
+                                    const parts = itemLine.split('->');
+                                    const actionText = parts[0].trim();
+                                    const actionCode = parts.length > 1 ? parts.slice(1).join('->').trim() : '';
+                                    actions.push({ id: 'act_' + Date.now() + '_' + Math.random().toString(36), text: actionText, code: actionCode, tags: [] });
+                                    break;
+                            }
+                        }
+
+                        // Auto-tagging
+                        const allItems = [...states, ...conditions, ...actions];
+                        allItems.forEach(item => {
+                            const textLower = item.text.toLowerCase();
+                            const tags = [];
+                            actors.forEach(actor => {
+                                const namesToCheck = [actor.name.toLowerCase(), ...actor.synonyms];
+                                if (namesToCheck.some(n => textLower.includes(n))) {
+                                    tags.push(actor.name);
+                                }
+                            });
+                            item.tags = [...new Set(tags)];
+                        });
+
+                        this.parsed = { actors, states, conditions, actions };
+                        this.compiled = null;
+                        this.heatmapData = [];
+                        this.heatmapIds = [];
+                    },
+
+                    totalEntities() {
+                        const p = this.parsed;
+                        return p.actors.length + p.states.length + p.conditions.length + p.actions.length;
+                    },
+                    getActorColor(actorName) {
+                        const actor = this.parsed.actors.find(a => a.name === actorName);
+                        return actor ? actor.color : '#cccccc';
+                    },
+                    debounce(func, wait) {
+                        let timeout;
+                        return (...args) => {
+                            clearTimeout(timeout);
+                            timeout = setTimeout(() => func.apply(this, args), wait);
+                        };
+                    },
+                    addLog(msg) {
+                        this.consoleLogs.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
+                        this.$nextTick(() => {
+                            const box = this.$refs.consoleBox;
+                            if (box) box.scrollTop = box.scrollHeight;
+                        });
+                    },
+
+                    // =========== Model & Compile (исправлено) ===========
+                    async loadModel() {
+                        if (this.embedder) return this.embedder;
+                        this.modelLoading = true;
+                        this.addLog('Загрузка модели multilingual-e5-small...');
+                        try {
+                            // Динамический импорт модуля Transformers.js
+                            const { pipeline } = await import('@xenova/transformers');
+                            this.embedder = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small');
+                            this.modelLoaded = true;
+                            this.addLog('Модель успешно загружена.');
+                        } catch (err) {
+                            this.addLog('Ошибка загрузки модели: ' + err.message);
+                            this.modelLoading = false;
+                            throw err;
+                        }
+                        this.modelLoading = false;
+                        return this.embedder;
+                    },
+
+                    async compile() {
+                        if (this.parsed.conditions.length === 0 && this.parsed.actions.length === 0) {
+                            this.addLog('Нет условий или действий для компиляции.');
+                            return;
+                        }
+                        this.compileMessage = '';
+                        this.addLog('Начало компиляции...');
+                        try {
+                            await this.loadModel();
+                            const embedder = this.embedder;
+
+                            const condEmb = [];
+                            for (let cond of this.parsed.conditions) {
+                                const out = await embedder(cond.text, { pooling: 'mean', normalize: true });
+                                condEmb.push({ id: cond.id, vector: out.data });
+                                this.addLog(`Условие "${cond.text}" закодировано.`);
+                            }
+
+                            const actEmb = [];
+                            for (let act of this.parsed.actions) {
+                                const out = await embedder(act.text, { pooling: 'mean', normalize: true });
+                                actEmb.push({ id: act.id, vector: out.data });
+                                this.addLog(`Действие "${act.text}" закодировано.`);
+                            }
+
+                            this.compiled = {
+                                conditions: condEmb,
+                                actions: actEmb
+                            };
+
+                            const heatmap = [];
+                            const ids = condEmb.map(c => c.id.substring(0, 8));
+                            for (let i = 0; i < condEmb.length; i++) {
+                                const row = [];
+                                for (let j = 0; j < condEmb.length; j++) {
+                                    const sim = this.cosineSim(condEmb[i].vector, condEmb[j].vector);
+                                    row.push(sim);
+                                }
+                                heatmap.push(row);
+                            }
+                            this.heatmapData = heatmap;
+                            this.heatmapIds = ids;
+                            this.compileMessage = `Компиляция завершена. Условий: ${condEmb.length}, действий: ${actEmb.length}`;
+                            this.addLog(this.compileMessage);
+                        } catch (err) {
+                            this.addLog('Ошибка компиляции: ' + err.message);
+                            this.compileMessage = 'Ошибка: ' + err.message;
+                        }
+                    },
+
+                    cosineSim(vecA, vecB) {
+                        let dot = 0, magA = 0, magB = 0;
+                        for (let i = 0; i < vecA.length; i++) {
+                            dot += vecA[i] * vecB[i];
+                            magA += vecA[i] * vecA[i];
+                            magB += vecB[i] * vecB[i];
+                        }
+                        magA = Math.sqrt(magA);
+                        magB = Math.sqrt(magB);
+                        return magA === 0 || magB === 0 ? 0 : dot / (magA * magB);
+                    },
+
+                    heatmapColor(val) {
+                        const r = Math.floor(255 * val);
+                        const g = Math.floor(255 * (1 - val));
+                        const b = 255 - Math.floor(255 * val);
+                        return `rgb(${r}, ${g}, ${b})`;
+                    },
+
+                    // =========== Test ===========
+                    async runTest() {
+                        if (!this.compiled) {
+                            this.addLog('Сначала скомпилируйте матрицу.');
+                            return;
+                        }
+                        this.testResult = null;
+                        const input = this.testInput.trim();
+                        if (!input) return;
+
+                        this.addLog(`Тестирование состояния: "${input}"`);
+                        try {
+                            const embedder = this.embedder || await this.loadModel();
+                            const out = await embedder(input, { pooling: 'mean', normalize: true });
+                            const stateVec = out.data;
+
+                            const activeConditions = [];
+                            for (let cond of this.compiled.conditions) {
+                                const sim = this.cosineSim(stateVec, cond.vector);
+                                const threshold = this.parsed.conditions.find(c => c.id === cond.id)?.threshold || 0.8;
+                                if (sim >= threshold) {
+                                    activeConditions.push({ ...cond, score: sim });
+                                }
+                            }
+                            this.addLog(`Активировано условий: ${activeConditions.length}`);
+
+                            if (activeConditions.length === 0) {
+                                this.testResult = { actionText: 'Нет активных условий', actionCode: '', score: 0, ranking: [] };
+                                return;
+                            }
+
+                            const scoredActions = [];
+                            for (let action of this.compiled.actions) {
+                                let total = 0;
+                                for (let active of activeConditions) {
+                                    const bridge = this.cosineSim(active.vector, action.vector);
+                                    total += active.score * bridge;
+                                }
+                                const actionMeta = this.parsed.actions.find(a => a.id === action.id);
+                                scoredActions.push({
+                                    id: action.id,
+                                    text: actionMeta?.text || '',
+                                    code: actionMeta?.code || '',
+                                    score: total
+                                });
+                            }
+
+                            scoredActions.sort((a, b) => b.score - a.score);
+                            const best = scoredActions[0];
+                            this.testResult = {
+                                actionText: best.text,
+                                actionCode: best.code,
+                                score: best.score,
+                                ranking: scoredActions.slice(0, 5)
+                            };
+                            this.addLog(`Результат: выбрано "${best.text}" (${(best.score*100).toFixed(1)}%)`);
+                        } catch (err) {
+                            this.addLog('Ошибка тестирования: ' + err.message);
+                        }
+                    },
+
+                    exportMatrix() {
+                        if (!this.compiled) return;
+                        const exportData = {
+                            meta: {
+                                version: '1.0',
+                                model: 'Xenova/multilingual-e5-small',
+                                compiled_at: new Date().toISOString()
+                            },
+                            conditions: this.compiled.conditions.map(c => ({
+                                id: c.id,
+                                vector: Array.from(c.vector),
+                                threshold: this.parsed.conditions.find(pc => pc.id === c.id)?.threshold || 0.8
+                            })),
+                            actions: this.compiled.actions.map(a => {
+                                const act = this.parsed.actions.find(pa => pa.id === a.id);
+                                return {
+                                    id: a.id,
+                                    vector: Array.from(a.vector),
+                                    code: act?.code || '',
+                                    text: act?.text || ''
+                                };
+                            })
+                        };
+                        const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'knowledge_matrix.json';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        this.addLog('Матрица экспортирована.');
+                    }
+                };
+            });
+        });
+    </script>
+</body>
+</html>
