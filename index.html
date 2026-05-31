@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Knowledge Matrix Builder (fixed)</title>
+    <title>Knowledge Matrix Builder (fixed v2)</title>
     <!-- Bootstrap 5 -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome -->
@@ -46,9 +46,6 @@
             max-height: 150px;
             overflow-y: auto;
         }
-        .status-badge {
-            font-size: 0.8rem;
-        }
     </style>
 </head>
 <body>
@@ -71,7 +68,7 @@
         </div>
 
         <div class="row">
-            <!-- LEFT PANEL: Editor & Parsed Tables -->
+            <!-- LEFT PANEL -->
             <div class="col-md-6">
                 <div class="card shadow-sm mb-3">
                     <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -89,7 +86,6 @@
                     </div>
                     <div class="card-body p-0">
                         <div class="tab-content">
-                            <!-- Editor Tab -->
                             <div class="tab-pane fade show active" id="editor-content" role="tabpanel">
                                 <textarea 
                                     class="form-control form-control-sm editor-textarea border-0" 
@@ -98,7 +94,6 @@
                                     placeholder="Введите DSL описание..."
                                     spellcheck="false"></textarea>
                             </div>
-                            <!-- Parsed Tables Tab -->
                             <div class="tab-pane fade" id="tables-content" role="tabpanel" style="max-height: 500px; overflow-y: auto;">
                                 <div class="p-2" x-show="parsed.actors.length">
                                     <h6 class="text-muted small">Актёры</h6>
@@ -180,9 +175,8 @@
                 </div>
             </div>
 
-            <!-- RIGHT PANEL: Dashboard, Compile, Test, Console -->
+            <!-- RIGHT PANEL -->
             <div class="col-md-6">
-                <!-- Compile & Status -->
                 <div class="card shadow-sm mb-3">
                     <div class="card-header py-2">
                         <i class="fa-solid fa-gear me-2"></i>Управление компиляцией
@@ -199,7 +193,7 @@
                     </div>
                 </div>
 
-                <!-- Heatmap card -->
+                <!-- Heatmap -->
                 <div class="card shadow-sm mb-3" x-show="heatmapData.length > 0">
                     <div class="card-header py-2">
                         <i class="fa-solid fa-table-cells me-2"></i>Тепловая карта сходства условий
@@ -245,24 +239,22 @@
                         <button class="btn btn-sm btn-success" @click="runTest()" :disabled="!compiled || modelLoading || testInput.trim() === ''">
                             <i class="fa-solid fa-play me-1"></i>Запустить тест
                         </button>
-
-                        <!-- Исправлено: используем x-if, чтобы не вычислять свойства null -->
                         <template x-if="testResult">
-                        <div class="mt-2">
-                            <div class="alert alert-success mb-1 p-2 small" role="alert">
-                                <strong>Выбрано действие:</strong> <span x-text="testResult.actionText"></span><br>
-                                <strong>Код:</strong> <code x-text="testResult.actionCode"></code><br>
-                                <strong>Уверенность:</strong> <span x-text="(testResult.score * 100).toFixed(1) + '%'"></span>
+                            <div class="mt-2">
+                                <div class="alert alert-success mb-1 p-2 small" role="alert">
+                                    <strong>Выбрано действие:</strong> <span x-text="testResult.actionText"></span><br>
+                                    <strong>Код:</strong> <code x-text="testResult.actionCode"></code><br>
+                                    <strong>Уверенность:</strong> <span x-text="(testResult.score * 100).toFixed(1) + '%'"></span>
+                                </div>
+                                <details class="small">
+                                    <summary>Ранжированный список действий</summary>
+                                    <ul class="list-unstyled mb-0">
+                                        <template x-for="(item, idx) in testResult.ranking" :key="idx">
+                                            <li><span x-text="item.text"></span> (<span x-text="item.score.toFixed(3)"></span>)</li>
+                                        </template>
+                                    </ul>
+                                </details>
                             </div>
-                            <details class="small">
-                                <summary>Ранжированный список действий</summary>
-                                <ul class="list-unstyled mb-0">
-                                    <template x-for="(item, idx) in testResult.ranking" :key="idx">
-                                        <li><span x-text="item.text"></span> (<span x-text="item.score.toFixed(3)"></span>)</li>
-                                    </template>
-                                </ul>
-                            </details>
-                        </div>
                         </template>
                     </div>
                 </div>
@@ -286,10 +278,8 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Alpine.js (global) -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
 
-    <!-- ====== НОВЫЙ СПОСОБ ПОДКЛЮЧЕНИЯ Transformers.js ====== -->
+    <!-- Transformers.js import map (для динамического импорта) -->
     <script type="importmap">
         {
             "imports": {
@@ -298,15 +288,13 @@
         }
     </script>
 
-    <script type="module">
-        // Весь основной код загружен как модуль, Alpine уже глобальный.
-        // Определяем Alpine-компонент.
+    <!-- Основной код приложения (обычный script, без module) – должен выполниться до Alpine -->
+    <script defer>
         document.addEventListener('alpine:init', () => {
             Alpine.data('builderApp', () => {
-                // Predefined actor colors
                 const actorColors = ['#4dc9f6', '#f67019', '#f53794', '#537bc4', '#acc236', '#166a8f', '#00a950', '#58595b', '#8549ba'];
                 let colorIndex = 0;
-                
+
                 return {
                     dslText: `Актёры:\n- робот [синонимы: гобот, шасси, тележка]\n- склад [синонимы: вархаус, ячейка]\n- база [синонимы: зарядка, станция]\n- груз [синонимы: паллета, коробка, посылка]\n- ворота\n\nСостояния:\n- робот пустой и находится на базе\n- на складе готов груз\n- впереди робота возникла стена\n\nУсловия:\n- если робот пустой и на базе\n- если на складе появился новый груз\n- если путь заблокирован препятствием\n\nДействия:\n- робот начинает движение вперед -> robot.drive.forward()\n- робот поворачивает налево -> robot.drive.turn(-90)\n- робот активирует захват -> robot.arm.grab()`,
                     parsed: {
@@ -331,7 +319,6 @@
                         this.debouncedParse = this.debounce(() => this.parseDSL(), 400);
                     },
 
-                    // =========== Parser ===========
                     parseDSL() {
                         const text = this.dslText;
                         const lines = text.split('\n');
@@ -389,7 +376,6 @@
                             }
                         }
 
-                        // Auto-tagging
                         const allItems = [...states, ...conditions, ...actions];
                         allItems.forEach(item => {
                             const textLower = item.text.toLowerCase();
@@ -432,13 +418,12 @@
                         });
                     },
 
-                    // =========== Model & Compile (исправлено) ===========
                     async loadModel() {
                         if (this.embedder) return this.embedder;
                         this.modelLoading = true;
                         this.addLog('Загрузка модели multilingual-e5-small...');
                         try {
-                            // Динамический импорт модуля Transformers.js
+                            // Динамический импорт – работает в обычном script при поддержке importmap
                             const { pipeline } = await import('@xenova/transformers');
                             this.embedder = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small');
                             this.modelLoaded = true;
@@ -477,10 +462,7 @@
                                 this.addLog(`Действие "${act.text}" закодировано.`);
                             }
 
-                            this.compiled = {
-                                conditions: condEmb,
-                                actions: actEmb
-                            };
+                            this.compiled = { conditions: condEmb, actions: actEmb };
 
                             const heatmap = [];
                             const ids = condEmb.map(c => c.id.substring(0, 8));
@@ -521,7 +503,6 @@
                         return `rgb(${r}, ${g}, ${b})`;
                     },
 
-                    // =========== Test ===========
                     async runTest() {
                         if (!this.compiled) {
                             this.addLog('Сначала скомпилируйте матрицу.');
@@ -618,5 +599,8 @@
             });
         });
     </script>
+
+    <!-- Alpine.js (загружается после регистрации компонента) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
 </body>
 </html>
